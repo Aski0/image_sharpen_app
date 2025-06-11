@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
   <meta charset="UTF-8">
-  <title>Sharpener</title>
+  <title>AI Sharpener</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon.png') }}">
 </head>
@@ -10,178 +10,384 @@
   <h1>AI SHARPENER</h1>
 
   <form id="upload-form" enctype="multipart/form-data">
-    <input type="file" name="image" accept="image/*" required />
-    <button type="submit">Prześlij</button>
+    <input type="file" name="image" id="image-input" accept="image/*" required />
+    {% if model_names %}
+      <button type="submit">Prześlij i Przetwórz Wszystkimi Modelami</button>
+    {% else %}
+      <button type="submit" disabled>Prześlij (Brak modeli)</button>
+      <p style="color:red; font-size:0.9em;">Nie załadowano żadnych modeli. Sprawdź konfigurację serwera.</p>
+    {% endif %}
   </form>
 
-  <div class="img-comp-container" id="img-comp-container" style="display: none;">
-    <div class="img-comp-img" style="position:relative;"> <!-- Wrapper dla obrazu "przed" -->
-      <img id="original-img" alt="Oryginalny obraz">
+  <div id="main-view" style="display: none;">
+    <div class="img-comp-container" id="img-comp-container">
+      <div class="img-comp-img" style="position:relative;">
+        <img id="original-img" alt="Oryginalny obraz">
+      </div>
+      <div id="img-comp-overlay" class="img-comp-overlay">
+        <img id="processed-img" alt="Przetworzony obraz">
+      </div>
+      <div id="slider-bar" class="img-comp-slider"></div>
     </div>
-    <div id="img-comp-overlay" class="img-comp-overlay"> <!-- Wrapper dla obrazu "po" (nakładka) -->
-      <img id="processed-img" alt="Przetworzony obraz">
+    <p id="current-model-display" style="font-weight: bold; margin-top: 10px;"></p>
 
+    <div id="model-selector-container" style="margin-top: 20px;">
+      <h3>Przełącz podgląd na wynik z modelu:</h3>
+      {% if model_names %}
+        {% for model_name in model_names %}
+          <button class="model-select-btn" data-model-id="{{ model_name }}">{{ model_name }}</button>
+        {% endfor %}
+      {% else %}
+        <p>Brak dostępnych modeli do wyboru.</p>
+      {% endif %}
     </div>
-    <div id="slider-bar" class="img-comp-slider"></div> <!-- Suwak -->
+  </div>
+
+  <div id="status-messages">
+    <div id="loading-indicator" style="display:none; margin-top:15px; font-weight:bold;">Przetwarzanie...</div>
+    <div id="error-message" style="display:none; margin-top:15px; color:red; font-weight:bold;"></div>
   </div>
 
   <script>
     const form = document.getElementById("upload-form");
-const originalImg = document.getElementById("original-img");
-const processedImg = document.getElementById("processed-img");
-const comparisonContainer = document.getElementById("img-comp-container");
-const overlay = document.getElementById("img-comp-overlay");
-const slider = document.getElementById("slider-bar");
-//const beforeLabelText = document.getElementById("before-label-text");
-//const afterLabelText = document.getElementById("after-label-text");
+    const imageInput = document.getElementById("image-input");
+    const mainView = document.getElementById("main-view");
+    const originalImg = document.getElementById("original-img");
+    const processedImg = document.getElementById("processed-img");
+    const comparisonContainer = document.getElementById("img-comp-container");
+    const overlay = document.getElementById("img-comp-overlay");
+    const slider = document.getElementById("slider-bar");
+    const modelSelectorContainer = document.getElementById("model-selector-container");
+    const loadingIndicator = document.getElementById("loading-indicator");
+    const errorMessageDiv = document.getElementById("error-message");
+    const currentModelDisplay = document.getElementById("current-model-display");
 
-// Usunięto resizeHandlerInstance, ponieważ obrazy mają stałe, naturalne wymiary
-// i nie powinny reagować na zmianę rozmiaru okna (chyba że kontener nadrzędny ma max-width).
+    let currentOriginalFile = null;
+    let currentProcessedImageUrls = {}; 
+    let currentSessionId = null;
+    let currentActiveModelId = "{{ default_model_id or '' }}";
+    let imageCompareInstance = null; 
+    const availableModelsJS = JSON.parse('{{ model_names | tojson | safe | e }}') || [];
 
-form.onsubmit = async function(e) {
-  e.preventDefault();
-  const formData = new FormData(form);
-  const imageFile = form.image.files[0];
+    document.addEventListener('DOMContentLoaded', () => {
+        initializeModelButtons();
+        initializeActiveModel();
+    });
 
-  originalImg.src = "";
-  processedImg.src = "";
-  comparisonContainer.style.display = "none";
-  // Jeśli wcześniej był resizeHandler, tu byśmy go usuwali
+    function initializeActiveModel() {
+        if (!currentActiveModelId && availableModelsJS && availableModelsJS.length > 0) {
+            currentActiveModelId = availableModelsJS[0];
+        }
+    }
 
-  const originalURL = URL.createObjectURL(imageFile);
-  originalImg.src = originalURL;
+    function initializeModelButtons() {
+        document.querySelectorAll('.model-select-btn').forEach(button => {
+            button.addEventListener('click', async function() {
+                const modelId = this.dataset.modelId;
+                if (!currentOriginalFile) {
+                    displayError("Najpierw prześlij obraz.");
+                    return;
+                }
+                if (!currentProcessedImageUrls[modelId] || currentProcessedImageUrls[modelId].status !== 'success') {
+                    displayError(`Wynik dla modelu "${modelId}" nie jest dostępny lub wystąpił błąd podczas jego przetwarzania.`);
+                    return;
+                }
+                if (modelId === currentActiveModelId && processedImg.src && processedImg.src !== "" && !processedImg.src.startsWith('blob:null')) {
+                     console.log("Model " + modelId + " jest już aktywny i wyświetlony.");
+                     return;
+                }
+                await switchToModelView(modelId);
+            });
+        });
+    }
 
-  const response = await fetch('/upload', {
-    method: 'POST',
-    body: formData
-  });
+    function displayLoading(show, message = "Przetwarzanie...") {
+        loadingIndicator.textContent = message;
+        loadingIndicator.style.display = show ? "block" : "none";
+        if (show) errorMessageDiv.style.display = "none";
+    }
 
-  const blob = await response.blob();
-  const processedURL = URL.createObjectURL(blob);
-  processedImg.src = processedURL;
+    function displayError(message) {
+        errorMessageDiv.textContent = message;
+        errorMessageDiv.style.display = "block";
+        displayLoading(false);
+    }
 
-  let imagesLoadedCount = 0;
-  const totalImagesToLoad = 2;
+    const loadImage = (imgElement, src, imageNameForError) => {
+        return new Promise((resolve, reject) => {
+            imgElement.onload = null;
+            imgElement.onerror = null;
 
-  function checkAllImagesLoaded() {
-    imagesLoadedCount++;
-    if (imagesLoadedCount === totalImagesToLoad) {
-      const naturalW = originalImg.naturalWidth;
-      const naturalH = originalImg.naturalHeight;
+            imgElement.onload = () => {
+                if (imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0) {
+                    resolve(imgElement);
+                } else {
+                    setTimeout(() => {
+                        if (imgElement.naturalWidth > 0 && imgElement.naturalHeight > 0) {
+                            resolve(imgElement);
+                        } else {
+                            console.warn(`Obraz ${imageNameForError} załadowany, ale wymiary (naturalWidth/Height) są 0. URL: ${src.substring(0,100)}`);
+                            reject(new Error(`Nie można pobrać wymiarów dla obrazu "${imageNameForError}" (są 0).`));
+                        }
+                    }, 50); 
+                }
+            };
+            imgElement.onerror = (event) => {
+                console.error(`Błąd ładowania obrazu ${imageNameForError}. URL: ${src.substring(0,100)}`, event);
+                reject(new Error(`Nie udało się załadować obrazu "${imageNameForError}". Sprawdź konsolę i połączenie.`));
+            };
+            imgElement.src = src;
+            if (imgElement.complete && imgElement.naturalWidth > 0) {
+                resolve(imgElement);
+            }
+        });
+    };
 
-      if (naturalW > 0 && naturalH > 0) {
-        // Ustaw wymiary kontenera głównego
-        comparisonContainer.style.width = naturalW + "px";
-        comparisonContainer.style.height = naturalH + "px";
+    async function switchToModelView(modelId) {
+        if (!currentProcessedImageUrls[modelId] || currentProcessedImageUrls[modelId].status !== 'success') {
+            displayError(`Wynik dla modelu "${modelId}" nie jest dostępny lub wystąpił błąd.`);
+            const firstValidModel = Object.keys(currentProcessedImageUrls).find(
+                key => currentProcessedImageUrls[key].status === 'success'
+            );
+            if (firstValidModel && firstValidModel !== modelId) {
+                 displayError(`Wynik dla modelu "${modelId}" nie jest dostępny. Wyświetlam "${firstValidModel}".`);
+                 await switchToModelView(firstValidModel);
+            } else if (!firstValidModel) {
+                 mainView.style.display = "none";
+                 form.style.display = "block";
+            }
+            return;
+        }
 
-        // Ustaw wymiary obrazu "przed" na jego naturalne wymiary
-        originalImg.style.width = naturalW + "px";
-        originalImg.style.height = naturalH + "px";
-
-        // Ustaw wymiary obrazu "po" (wewnątrz nakładki) na wymiary obrazu "przed"
-        // CSS z `object-fit: cover` zajmie się zachowaniem proporcji i przycięciem obrazu "po"
-        processedImg.style.width = naturalW + "px";
-        processedImg.style.height = naturalH + "px";
-
-        // Ustaw wysokość nakładki na wysokość obrazu "przed"
-        overlay.style.height = naturalH + "px";
-
-        comparisonContainer.style.display = "block";
-        initImageCompare(naturalW); // Przekazujemy tylko szerokość, bo wysokość jest ustalona
-
-        if (beforeLabelText) beforeLabelText.textContent = `Przed ${naturalW}x${naturalH}`;
-        // Dla obrazu "po" pokazujemy jego naturalne wymiary, nawet jeśli jest przycinany inaczej
-        if (afterLabelText) afterLabelText.textContent = `Po ${processedImg.naturalWidth}x${processedImg.naturalHeight}`;
+        displayLoading(true, `Ładowanie wyniku dla ${modelId}...`);
         
-        form.style.display = 'none';
-      } else {
-        console.error("Nie można pobrać naturalnych wymiarów obrazu oryginalnego.");
-        comparisonContainer.style.display = "none";
+        const processedImageUrl = currentProcessedImageUrls[modelId].url;
+
+        if (processedImg.dataset.previousUrl && processedImg.dataset.previousUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(processedImg.dataset.previousUrl);
+        }
+        processedImg.dataset.previousUrl = processedImageUrl;
+
+        try {
+            if (!originalImg.src || originalImg.naturalWidth === 0) {
+                console.error("Oryginalny obraz nie jest załadowany lub nie ma wymiarów.");
+                displayError("Błąd: Oryginalny obraz nie jest gotowy.");
+                displayLoading(false);
+                return;
+            }
+
+            await loadImage(processedImg, processedImageUrl, `przetworzony (${modelId})`);
+            
+            currentActiveModelId = modelId;
+            currentModelDisplay.textContent = `Wynik dla: ${modelId}`;
+            document.querySelectorAll('.model-select-btn').forEach(btn => {
+                btn.classList.toggle('active-model', btn.dataset.modelId === modelId);
+            });
+
+            setupComparisonView(originalImg.naturalWidth, originalImg.naturalHeight);
+            displayLoading(false);
+            mainView.style.display = "block";
+            form.style.display = 'none';
+
+        } catch (error) {
+            console.error(`Błąd podczas ładowania/wyświetlania przetworzonego obrazu dla modelu ${modelId}:`, error);
+            displayError(error.message || `Wystąpił błąd podczas wyświetlania wyniku dla ${modelId}.`);
+            displayLoading(false);
+        }
+    }
+
+
+    form.onsubmit = async function(e) {
+        e.preventDefault();
+        errorMessageDiv.style.display = "none";
+        const imageFile = imageInput.files[0];
+
+        if (!imageFile) {
+            displayError("Proszę wybrać plik obrazu.");
+            return;
+        }
+        if (!imageFile.type.startsWith('image/')) {
+            displayError("Wybrany plik nie jest obrazem. Proszę wybrać plik JPG, PNG, itp.");
+            imageInput.value = "";
+            return;
+        }
+
+        currentOriginalFile = imageFile;
+        displayLoading(true, "Przesyłanie i przygotowywanie obrazu...");
+        
+        if (originalImg.dataset.previousUrl && originalImg.dataset.previousUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(originalImg.dataset.previousUrl);
+        }
+        const originalURL = URL.createObjectURL(currentOriginalFile);
+        originalImg.dataset.previousUrl = originalURL;
+        
+        try {
+            await loadImage(originalImg, originalURL, "oryginalny");
+        } catch (error) {
+            displayError("Nie udało się załadować oryginalnego obrazu: " + error.message);
+            displayLoading(false);
+            imageInput.value = "";
+            return;
+        }
+
+        displayLoading(true, "Przetwarzanie obrazu wszystkimi modelami...");
+        const formData = new FormData();
+        formData.append('image', currentOriginalFile);
+
+        try {
+            const response = await fetch('/process_all_models', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: `Błąd serwera: ${response.status} ${response.statusText}` }));
+                throw new Error(errorData.error || `Błąd serwera: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            currentSessionId = data.sessionId;
+            currentProcessedImageUrls = data.results;
+
+            const successfulModels = Object.keys(currentProcessedImageUrls).filter(
+                key => currentProcessedImageUrls[key].status === 'success'
+            );
+
+            if (successfulModels.length === 0) {
+                displayError("Serwer nie przetworzył pomyślnie obrazu żadnym modelem. Sprawdź logi serwera.");
+                displayLoading(false);
+                mainView.style.display = "none";
+                form.style.display = "block";
+                return;
+            }
+
+            let modelToDisplayInitially = currentActiveModelId;
+            if (!currentProcessedImageUrls[modelToDisplayInitially] || currentProcessedImageUrls[modelToDisplayInitially].status !== 'success') {
+                modelToDisplayInitially = "{{ default_model_id or '' }}";
+            }
+            if (!currentProcessedImageUrls[modelToDisplayInitially] || currentProcessedImageUrls[modelToDisplayInitially].status !== 'success') {
+                modelToDisplayInitially = successfulModels[0];
+            }
+            
+            if (modelToDisplayInitially) {
+                await switchToModelView(modelToDisplayInitially);
+            } else {
+                 displayError("Nie znaleziono modelu do wyświetlenia, mimo pomyślnego przetwarzania.");
+                 displayLoading(false);
+                 mainView.style.display = "none";
+                 form.style.display = "block";
+            }
+
+        } catch (error) {
+            console.error("Błąd podczas przesyłania lub przetwarzania przez wszystkie modele:", error);
+            displayError(error.message || "Wystąpił nieoczekiwany błąd komunikacji z serwerem.");
+            displayLoading(false);
+            mainView.style.display = "none";
+            form.style.display = "block";
+        }
+    };
+
+    function setupComparisonView(naturalW, naturalH) {
+        if (!originalImg || !processedImg || !comparisonContainer || !overlay || !slider) {
+            console.error("Jeden z elementów porównywarki nie istnieje w DOM.");
+            return;
+        }
+        if (naturalW > 0 && naturalH > 0) {
+            comparisonContainer.style.width = naturalW + "px";
+            comparisonContainer.style.height = naturalH + "px";
+            originalImg.style.width = naturalW + "px";
+            originalImg.style.height = naturalH + "px";
+            processedImg.style.width = naturalW + "px";
+            processedImg.style.height = naturalH + "px";
+            overlay.style.height = naturalH + "px";
+            
+            comparisonContainer.style.display = "block";
+
+            if (imageCompareInstance && typeof imageCompareInstance.destroy === 'function') {
+                imageCompareInstance.destroy();
+            }
+            imageCompareInstance = initImageCompare(naturalW);
+        } else {
+            console.error("setupComparisonView: Nieprawidłowe wymiary obrazu (przekazane zero lub NaN).", naturalW, naturalH);
+            displayError("Nie można ustawić porównywarki: nieprawidłowe wymiary obrazu.");
+            comparisonContainer.style.display = "none";
+        }
+    }
+
+    function initImageCompare(imgWidth) {
+      let clicked = 0;
+      const baseImageWidth = imgWidth;
+      let currentPercentage = 50; 
+
+      function applySliderPosition(pixelPosition) {
+        if (baseImageWidth > 0) {
+          currentPercentage = (pixelPosition / baseImageWidth) * 100;
+        } else {
+          currentPercentage = 50;
+        }
+        if(overlay) overlay.style.width = pixelPosition + "px";
+        if(slider && slider.offsetWidth >= 0) {
+             slider.style.left = pixelPosition - (slider.offsetWidth / 2) + "px";
+        } else if (slider) {
+            slider.style.left = pixelPosition + "px"; 
+        }
       }
+
+      applySliderPosition((baseImageWidth * currentPercentage) / 100);
+
+      const slideStartHandler = (e) => {
+        e.preventDefault(); 
+        clicked = 1;
+        window.addEventListener("mousemove", slideMoveHandler, { passive: true });
+        window.addEventListener("touchmove", slideMoveHandler, { passive: false }); 
+      };
+
+      const slideStopHandler = () => {
+        if (!clicked) return;
+        clicked = 0;
+        window.removeEventListener("mousemove", slideMoveHandler);
+        window.removeEventListener("touchmove", slideMoveHandler);
+      };
+
+      const slideMoveHandler = (e) => {
+        if (!clicked) return;
+        if (e.type === "touchmove") {
+            e.preventDefault();
+        }
+        let pos = getCursorXPosition(e);
+        if (pos < 0) pos = 0;
+        if (pos > baseImageWidth) pos = baseImageWidth;
+        applySliderPosition(pos);
+      };
+
+      function getCursorXPosition(e) {
+        if (!originalImg) return 0;
+        const rect = originalImg.getBoundingClientRect(); 
+        let x = 0;
+        const pageX = e.changedTouches ? e.changedTouches[0].pageX : e.pageX;
+        x = pageX - rect.left; 
+        return x;
+      }
+      
+      if(slider) {
+        slider.addEventListener("mousedown", slideStartHandler);
+        slider.addEventListener("touchstart", slideStartHandler, { passive: false }); 
+      }
+      window.addEventListener("mouseup", slideStopHandler);
+      window.addEventListener("touchend", slideStopHandler);
+
+      function destroy() {
+        if(slider) {
+            slider.removeEventListener("mousedown", slideStartHandler);
+            slider.removeEventListener("touchstart", slideStartHandler);
+        }
+        window.removeEventListener("mouseup", slideStopHandler);
+        window.removeEventListener("touchend", slideStopHandler);
+        window.removeEventListener("mousemove", slideMoveHandler); 
+        window.removeEventListener("touchmove", slideMoveHandler);
+      }
+      return { destroy }; 
     }
-  }
-
-  originalImg.onload = checkAllImagesLoaded;
-  processedImg.onload = checkAllImagesLoaded;
-
-  // Obsługa obrazów z cache
-  if (originalImg.complete && originalImg.naturalWidth > 0) {
-      originalImg.onload = null; 
-      checkAllImagesLoaded();
-  }
-  if (processedImg.complete && processedImg.naturalWidth > 0) {
-      processedImg.onload = null;
-      checkAllImagesLoaded();
-  }
-};
-
-function initImageCompare(imgWidth) { // Odbieramy szerokość obrazu
-  let clicked = 0;
-  const baseImageWidth = imgWidth; // Szerokość obrazu jest teraz jego naturalną szerokością
-  let currentPercentage = 50; // Początkowa pozycja suwaka
-
-  // Ustawienie początkowej pozycji nakładki i suwaka
-  applySliderPosition((baseImageWidth * currentPercentage) / 100);
-
-  slider.addEventListener("mousedown", startSlide);
-  window.addEventListener("mouseup", stopSlide);
-  slider.addEventListener("touchstart", startSlide, { passive: false });
-  window.addEventListener("touchend", stopSlide);
-
-  function startSlide(e) {
-    e.preventDefault();
-    clicked = 1;
-    // baseImageWidth jest stałe (naturalna szerokość obrazu)
-    window.addEventListener("mousemove", moveSlide);
-    window.addEventListener("touchmove", moveSlide, { passive: false });
-  }
-
-  function stopSlide() {
-    if (!clicked) return;
-    clicked = 0;
-    window.removeEventListener("mousemove", moveSlide);
-    window.removeEventListener("touchmove", moveSlide);
-  }
-
-  function moveSlide(e) {
-    if (!clicked) return;
-    
-    let pos = getCursorXPosition(e);
-    // baseImageWidth jest stałe
-    if (pos < 0) pos = 0;
-    if (pos > baseImageWidth) pos = baseImageWidth;
-
-    applySliderPosition(pos);
-  }
-
-  function getCursorXPosition(e) {
-    e = e || window.event;
-    const rect = originalImg.getBoundingClientRect(); // Pozycja obrazu "przed"
-    let x = 0;
-
-    if (e.changedTouches) {
-        x = e.changedTouches[0].pageX - rect.left;
-    } else {
-        x = e.pageX - rect.left;
-    }
-    return x;
-  }
-
-  function applySliderPosition(pixelPosition) {
-    if (baseImageWidth > 0) {
-        currentPercentage = (pixelPosition / baseImageWidth) * 100;
-    } else {
-        currentPercentage = 50;
-    }
-
-    overlay.style.width = pixelPosition + "px";
-    slider.style.left = pixelPosition - (slider.offsetWidth / 2) + "px";
-  }
-  
-  // Usunięto listener 'resize', ponieważ zakładamy stałe wymiary obrazów.
-  // Jeśli komponent miałby być responsywny (np. skalować się, gdy okno jest mniejsze niż obraz),
-  // to wymagałoby to innej logiki i potencjalnie zmiany podejścia do "oryginalnych wymiarów".
-}
   </script>
 </body>
 </html>

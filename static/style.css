@@ -4,99 +4,181 @@ body {
   margin: 0;
   padding: 20px;
   background: #f0f0f0;
+  color: #333;
+}
+
+h1 {
+  color: #0056b3;
 }
 
 #upload-form {
-  margin-bottom: 20px;
+  margin-bottom: 30px;
+  padding: 20px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  display: inline-block;
+}
+
+#upload-form input[type="file"] {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 10px;
+}
+#upload-form button[type="submit"] {
+  padding: 10px 15px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+#upload-form button[type="submit"]:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+#upload-form button[type="submit"]:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+
+#main-view {
+    margin-top: 20px;
 }
 
 .img-comp-container {
   position: relative;
-  /* Szerokość i wysokość będą ustawione przez JavaScript na podstawie naturalnych wymiarów obrazu */
-  margin: 20px auto;
-  line-height: 0; /* Usuwa dodatkową przestrzeń pod obrazami */
-  display: inline-block; /* Aby kontener dopasował się do zawartości (obrazów) */
-  /* Opcjonalnie: max-width: 100%; jeśli chcesz, aby bardzo duże obrazy nie wylewały się poza ekran,
-     ale to spowoduje ich skalowanie, co może być sprzeczne z "oryginalne wymiary" */
+  margin: 0 auto 20px auto; /* Centrowanie i margines dolny */
+  line-height: 0; 
+  display: inline-block; 
+  border: 1px solid #ccc;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 
 .img-comp-img {
   position: relative;
-  display: block; /* Obraz "przed" definiuje wymiary */
+  display: block; 
 }
 
-#original-img {
+#original-img, #processed-img {
   display: block;
-  /* Szerokość i wysokość zostaną ustawione przez JavaScript na naturalne wymiary */
-  /* Usuwamy object-fit, aby wyświetlić w oryginalnych proporcjach bez przycinania */
+  /* max-width i max-height, aby duże obrazy nie rozpychały strony nadmiernie,
+     ale zachowaj ostrożność, bo to skaluje obraz, a chcesz "oryginalne wymiary"
+     Możesz je usunąć, jeśli zawsze chcesz oryginalny rozmiar, nawet jeśli duży. */
+  /* max-width: 90vw;  */
+  /* max-height: 80vh; */
 }
 
 .img-comp-overlay {
   position: absolute;
   top: 0;
   left: 0;
-  /* Wysokość zostanie ustawiona przez JavaScript na wysokość obrazu oryginalnego */
-  /* Szerokość będzie dynamicznie zmieniana przez JavaScript (suwak) */
-  overflow: hidden; /* To przycina obraz "po" */
+  overflow: hidden; 
 }
 
 #processed-img {
-  display: block;
-  position: absolute; /* Pozycjonowanie wewnątrz nakładki */
+  position: absolute; 
   top: 0;
   left: 0;
-  /* Szerokość i wysokość zostaną ustawione przez JavaScript na wymiary obrazu oryginalnego.
-     `object-fit: cover` zapewni, że obraz "po" wypełni te wymiary zachowując
-     swoje własne proporcje, przycinając nadmiar. */
-  object-fit: cover;
-  object-position: top left; /* Możesz zmienić na 'center center' itp. jak ma być przycinane */
-  /* max-width: none !important; nie jest już tak krytyczne, bo wymiary są ustawiane bezpośrednio */
+  object-fit: cover; /* Zachowuje proporcje obrazu "po", wypełniając overlay */
+  object-position: top left; 
 }
 
 .img-comp-slider {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 2px;
-  background-color: white;
+  width: 3px; /* Grubsza linia suwaka */
+  background-color: rgba(255, 255, 255, 0.8);
   cursor: ew-resize;
   z-index: 100;
+  box-shadow: 0 0 5px rgba(0,0,0,0.3); /* Lekki cień dla linii */
 }
 
 .img-comp-slider::after {
-  content: "< >";
+  content: "↔"; /* Prostszy symbol */
   position: absolute;
   top: 50%;
-  left: -19px;
-  transform: translateY(-50%);
-  width: 40px;
-  height: 40px;
-  background-color: white;
-  color: #333;
+  left: 50%; 
+  transform: translate(-50%, -50%);
+  width: 36px; /* Nieco mniejszy uchwyt */
+  height: 36px;
+  background-color: #007bff;
+  color: white;
   border-radius: 50%;
-  line-height: 40px;
+  line-height: 36px;
   text-align: center;
   font-weight: bold;
-  font-size: 16px;
-  box-shadow: 0 0 8px rgba(0,0,0,0.3);
-  z-index: 110;
+  font-size: 18px; /* Większy symbol */
+  box-shadow: 0 0 8px rgba(0,0,0,0.5);
+  z-index: 110; 
 }
 
-.comp-label {
-  position: absolute;
-  bottom: 10px;
-  padding: 5px 10px;
-  background-color: rgba(0, 0, 0, 0.7);
+#current-model-display {
+    font-size: 1.1em;
+    color: #333;
+}
+
+#model-selector-container {
+  padding: 15px;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 5px;
+  margin-top: 25px;
+  display: inline-block;
+  text-align: left; /* Dla przycisków wewnątrz */
+}
+
+#model-selector-container h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 1.2em;
+  color: #343a40;
+  text-align: center;
+}
+
+.model-select-btn {
+  padding: 10px 15px; /* Większe przyciski */
+  margin: 5px;
+  background-color: #6c757d;
   color: white;
-  font-size: 12px;
-  border-radius: 3px;
-  user-select: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out, box-shadow 0.2s ease;
+  font-size: 0.95em;
 }
 
-.before-label {
-  left: 10px;
+.model-select-btn:hover:not(.active-model) {
+  background-color: #5a6268;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.img-comp-overlay .after-label {
-  right: 10px;
+.model-select-btn.active-model {
+  background-color: #007bff;
+  font-weight: bold;
+  box-shadow: 0 0 0 0.2rem rgba(0,123,255,.5); /* Efekt "focus" jak w Bootstrap */
+  cursor: default;
+}
+
+#status-messages {
+    margin-top: 20px;
+    min-height: 2em; /* Zapewnia miejsce, nawet gdy komunikaty są ukryte */
+}
+
+#loading-indicator {
+  color: #007bff;
+  font-size: 1.1em;
+}
+
+#error-message {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+  padding: 10px 15px;
+  border-radius: 4px;
+  margin: 10px auto; 
+  display: inline-block; 
 }
