@@ -1,0 +1,102 @@
+body {
+  font-family: sans-serif;
+  text-align: center;
+  margin: 0;
+  padding: 20px;
+  background: #f0f0f0;
+}
+
+#upload-form {
+  margin-bottom: 20px;
+}
+
+.img-comp-container {
+  position: relative;
+  /* Szerokość i wysokość będą ustawione przez JavaScript na podstawie naturalnych wymiarów obrazu */
+  margin: 20px auto;
+  line-height: 0; /* Usuwa dodatkową przestrzeń pod obrazami */
+  display: inline-block; /* Aby kontener dopasował się do zawartości (obrazów) */
+  /* Opcjonalnie: max-width: 100%; jeśli chcesz, aby bardzo duże obrazy nie wylewały się poza ekran,
+     ale to spowoduje ich skalowanie, co może być sprzeczne z "oryginalne wymiary" */
+}
+
+.img-comp-img {
+  position: relative;
+  display: block; /* Obraz "przed" definiuje wymiary */
+}
+
+#original-img {
+  display: block;
+  /* Szerokość i wysokość zostaną ustawione przez JavaScript na naturalne wymiary */
+  /* Usuwamy object-fit, aby wyświetlić w oryginalnych proporcjach bez przycinania */
+}
+
+.img-comp-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Wysokość zostanie ustawiona przez JavaScript na wysokość obrazu oryginalnego */
+  /* Szerokość będzie dynamicznie zmieniana przez JavaScript (suwak) */
+  overflow: hidden; /* To przycina obraz "po" */
+}
+
+#processed-img {
+  display: block;
+  position: absolute; /* Pozycjonowanie wewnątrz nakładki */
+  top: 0;
+  left: 0;
+  /* Szerokość i wysokość zostaną ustawione przez JavaScript na wymiary obrazu oryginalnego.
+     `object-fit: cover` zapewni, że obraz "po" wypełni te wymiary zachowując
+     swoje własne proporcje, przycinając nadmiar. */
+  object-fit: cover;
+  object-position: top left; /* Możesz zmienić na 'center center' itp. jak ma być przycinane */
+  /* max-width: none !important; nie jest już tak krytyczne, bo wymiary są ustawiane bezpośrednio */
+}
+
+.img-comp-slider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: white;
+  cursor: ew-resize;
+  z-index: 100;
+}
+
+.img-comp-slider::after {
+  content: "< >";
+  position: absolute;
+  top: 50%;
+  left: -19px;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  background-color: white;
+  color: #333;
+  border-radius: 50%;
+  line-height: 40px;
+  text-align: center;
+  font-weight: bold;
+  font-size: 16px;
+  box-shadow: 0 0 8px rgba(0,0,0,0.3);
+  z-index: 110;
+}
+
+.comp-label {
+  position: absolute;
+  bottom: 10px;
+  padding: 5px 10px;
+  background-color: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 12px;
+  border-radius: 3px;
+  user-select: none;
+}
+
+.before-label {
+  left: 10px;
+}
+
+.img-comp-overlay .after-label {
+  right: 10px;
+}

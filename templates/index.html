@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Sharpener</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon.png') }}">
+</head>
+<body>
+  <h1>AI SHARPENER</h1>
+
+  <form id="upload-form" enctype="multipart/form-data">
+    <input type="file" name="image" accept="image/*" required />
+    <button type="submit">Prześlij</button>
+  </form>
+
+  <div class="img-comp-container" id="img-comp-container" style="display: none;">
+    <div class="img-comp-img" style="position:relative;"> <!-- Wrapper dla obrazu "przed" -->
+      <img id="original-img" alt="Oryginalny obraz">
+    </div>
+    <div id="img-comp-overlay" class="img-comp-overlay"> <!-- Wrapper dla obrazu "po" (nakładka) -->
+      <img id="processed-img" alt="Przetworzony obraz">
+
+    </div>
+    <div id="slider-bar" class="img-comp-slider"></div> <!-- Suwak -->
+  </div>
+
+  <script>
+    const form = document.getElementById("upload-form");
+const originalImg = document.getElementById("original-img");
+const processedImg = document.getElementById("processed-img");
+const comparisonContainer = document.getElementById("img-comp-container");
+const overlay = document.getElementById("img-comp-overlay");
+const slider = document.getElementById("slider-bar");
+//const beforeLabelText = document.getElementById("before-label-text");
+//const afterLabelText = document.getElementById("after-label-text");
+
+// Usunięto resizeHandlerInstance, ponieważ obrazy mają stałe, naturalne wymiary
+// i nie powinny reagować na zmianę rozmiaru okna (chyba że kontener nadrzędny ma max-width).
+
+form.onsubmit = async function(e) {
+  e.preventDefault();
+  const formData = new FormData(form);
+  const imageFile = form.image.files[0];
+
+  originalImg.src = "";
+  processedImg.src = "";
+  comparisonContainer.style.display = "none";
+  // Jeśli wcześniej był resizeHandler, tu byśmy go usuwali
+
+  const originalURL = URL.createObjectURL(imageFile);
+  originalImg.src = originalURL;
+
+  const response = await fetch('/upload', {
+    method: 'POST',
+    body: formData
+  });
+
+  const blob = await response.blob();
+  const processedURL = URL.createObjectURL(blob);
+  processedImg.src = processedURL;
+
+  let imagesLoadedCount = 0;
+  const totalImagesToLoad = 2;
+
+  function checkAllImagesLoaded() {
+    imagesLoadedCount++;
+    if (imagesLoadedCount === totalImagesToLoad) {
+      const naturalW = originalImg.naturalWidth;
+      const naturalH = originalImg.naturalHeight;
+
+      if (naturalW > 0 && naturalH > 0) {
+        // Ustaw wymiary kontenera głównego
+        comparisonContainer.style.width = naturalW + "px";
+        comparisonContainer.style.height = naturalH + "px";
+
+        // Ustaw wymiary obrazu "przed" na jego naturalne wymiary
+        originalImg.style.width = naturalW + "px";
+        originalImg.style.height = naturalH + "px";
+
+        // Ustaw wymiary obrazu "po" (wewnątrz nakładki) na wymiary obrazu "przed"
+        // CSS z `object-fit: cover` zajmie się zachowaniem proporcji i przycięciem obrazu "po"
+        processedImg.style.width = naturalW + "px";
+        processedImg.style.height = naturalH + "px";
+
+        // Ustaw wysokość nakładki na wysokość obrazu "przed"
+        overlay.style.height = naturalH + "px";
+
+        comparisonContainer.style.display = "block";
+        initImageCompare(naturalW); // Przekazujemy tylko szerokość, bo wysokość jest ustalona
+
+        if (beforeLabelText) beforeLabelText.textContent = `Przed ${naturalW}x${naturalH}`;
+        // Dla obrazu "po" pokazujemy jego naturalne wymiary, nawet jeśli jest przycinany inaczej
+        if (afterLabelText) afterLabelText.textContent = `Po ${processedImg.naturalWidth}x${processedImg.naturalHeight}`;
+        
+        form.style.display = 'none';
+      } else {
+        console.error("Nie można pobrać naturalnych wymiarów obrazu oryginalnego.");
+        comparisonContainer.style.display = "none";
+      }
+    }
+  }
+
+  originalImg.onload = checkAllImagesLoaded;
+  processedImg.onload = checkAllImagesLoaded;
+
+  // Obsługa obrazów z cache
+  if (originalImg.complete && originalImg.naturalWidth > 0) {
+      originalImg.onload = null; 
+      checkAllImagesLoaded();
+  }
+  if (processedImg.complete && processedImg.naturalWidth > 0) {
+      processedImg.onload = null;
+      checkAllImagesLoaded();
+  }
+};
+
+function initImageCompare(imgWidth) { // Odbieramy szerokość obrazu
+  let clicked = 0;
+  const baseImageWidth = imgWidth; // Szerokość obrazu jest teraz jego naturalną szerokością
+  let currentPercentage = 50; // Początkowa pozycja suwaka
+
+  // Ustawienie początkowej pozycji nakładki i suwaka
+  applySliderPosition((baseImageWidth * currentPercentage) / 100);
+
+  slider.addEventListener("mousedown", startSlide);
+  window.addEventListener("mouseup", stopSlide);
+  slider.addEventListener("touchstart", startSlide, { passive: false });
+  window.addEventListener("touchend", stopSlide);
+
+  function startSlide(e) {
+    e.preventDefault();
+    clicked = 1;
+    // baseImageWidth jest stałe (naturalna szerokość obrazu)
+    window.addEventListener("mousemove", moveSlide);
+    window.addEventListener("touchmove", moveSlide, { passive: false });
+  }
+
+  function stopSlide() {
+    if (!clicked) return;
+    clicked = 0;
+    window.removeEventListener("mousemove", moveSlide);
+    window.removeEventListener("touchmove", moveSlide);
+  }
+
+  function moveSlide(e) {
+    if (!clicked) return;
+    
+    let pos = getCursorXPosition(e);
+    // baseImageWidth jest stałe
+    if (pos < 0) pos = 0;
+    if (pos > baseImageWidth) pos = baseImageWidth;
+
+    applySliderPosition(pos);
+  }
+
+  function getCursorXPosition(e) {
+    e = e || window.event;
+    const rect = originalImg.getBoundingClientRect(); // Pozycja obrazu "przed"
+    let x = 0;
+
+    if (e.changedTouches) {
+        x = e.changedTouches[0].pageX - rect.left;
+    } else {
+        x = e.pageX - rect.left;
+    }
+    return x;
+  }
+
+  function applySliderPosition(pixelPosition) {
+    if (baseImageWidth > 0) {
+        currentPercentage = (pixelPosition / baseImageWidth) * 100;
+    } else {
+        currentPercentage = 50;
+    }
+
+    overlay.style.width = pixelPosition + "px";
+    slider.style.left = pixelPosition - (slider.offsetWidth / 2) + "px";
+  }
+  
+  // Usunięto listener 'resize', ponieważ zakładamy stałe wymiary obrazów.
+  // Jeśli komponent miałby być responsywny (np. skalować się, gdy okno jest mniejsze niż obraz),
+  // to wymagałoby to innej logiki i potencjalnie zmiany podejścia do "oryginalnych wymiarów".
+}
+  </script>
+</body>
+</html>
