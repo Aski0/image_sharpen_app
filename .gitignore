@@ -3,7 +3,7 @@ blured_images1000/
 original_images/
 original_images1000/
 *.ipynb
-*.h5
+
 requirements.txt
 elsa_roz.png
 app2.py
