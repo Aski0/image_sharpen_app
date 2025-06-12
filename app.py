@@ -20,8 +20,12 @@ MODEL_PATHS = {
     "Model 1": "model1000x512_b1_ep30.h5",
     "Model 2": "model800x2k_b1_ep10.h5",
     "Model 3": "model1000x512_b1_ep10.h5",
-    "Model 4": "model4.h5",
-    "Model 5": "model5.h5",
+    "Model 4": "model2000x512_b1_ep30.h5",
+    "Model 5": "model100x_0,5k_b49_7ep10.h5",
+    "Model 6": "model100x_0,5k_b49_7ep10.h5",
+    "Model 7": "model400x2k_1024_b101_15ep7.h5",
+    "Model 8": "model800x2k_b81_10ep5.h5",
+    "Model 9": "model800x2k_b101_15ep8.h5",
 }
 
 # Bufory do przechowywania załadowanych modeli i dostępnych nazw
@@ -55,6 +59,104 @@ load_application_models()
 
 #  Funkcja do przetwarzania obrazu za pomocą modelu AI
 def sharpen_image_ai(image_bytes, model_id):
+    selected_model = MODELS.get(model_id)
+
+    if selected_model is None:
+        app.logger.error(f"Model '{model_id}' nie jest dostępny lub nie został załadowany.")
+        raise ValueError(f"Model '{model_id}' nie jest załadowany lub nie istnieje.")
+
+    # Dekodowanie bajtów do obrazu OpenCV
+    file_bytes_np = np.asarray(bytearray(image_bytes), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes_np, cv2.IMREAD_COLOR)
+
+    if img is None:
+        raise ValueError("Nie udało się zdekodować obrazu. Upewnij się, że to poprawny format obrazu (np. JPG, PNG).")
+
+    img_float = img.astype('float32')
+
+    # Obsługa modeli 5–9 – tylko kanał Y
+    if model_id in ["Model 5", "Model 6", "Model 7", "Model 8", "Model 9"]:
+        # Konwersja do YCbCr
+        ycbcr = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+        y = ycbcr[:, :, 0]  # tylko kanał Y
+
+        # Przygotowanie tensoru
+        input_tensor = np.expand_dims(np.expand_dims(y, axis=0), axis=-1)
+
+        # Predykcja
+        app.logger.info(f"Przetwarzanie tylko kanału Y dla modelu: {model_id}")
+        pred_y = selected_model.predict(input_tensor)[0, :, :, 0]
+        pred_y = np.clip(pred_y, 0, 255).astype('uint8')
+
+        # Zamiana przetworzonego Y na RGB (reszta kanałów bez zmian)
+        ycbcr[:, :, 0] = pred_y
+        result_img = cv2.cvtColor(ycbcr, cv2.COLOR_YCrCb2BGR)
+
+    else:
+        # Standardowe modele RGB
+        input_tensor = np.expand_dims(img_float, axis=0)
+        app.logger.info(f"Przetwarzanie całego obrazu RGB dla modelu: {model_id}")
+        output = selected_model.predict(input_tensor)[0]
+        result_img = np.clip(output, 0, 255).astype('uint8')
+
+    # Kodowanie do JPG
+    is_success, buffer = cv2.imencode(".jpg", result_img)
+    if not is_success:
+        raise ValueError("Nie udało się zakodować przetworzonego obrazu do formatu JPG.")
+
+    return buffer.tobytes()
+
+    selected_model = MODELS.get(model_id)
+
+    if selected_model is None:
+        app.logger.error(f"Model '{model_id}' nie jest dostępny lub nie został załadowany.")
+        raise ValueError(f"Model '{model_id}' nie jest załadowany lub nie istnieje.")
+
+    # Dekodowanie bajtów obrazu do formatu OpenCV
+    file_bytes_np = np.asarray(bytearray(image_bytes), dtype=np.uint8)
+    img = cv2.imdecode(file_bytes_np, cv2.IMREAD_COLOR)
+
+    if img is None:
+        raise ValueError("Nie udało się zdekodować obrazu. Upewnij się, że to poprawny format obrazu (np. JPG, PNG).")
+
+    # Konwersja do float32
+    img_float = img.astype('float32')
+
+    # Sprawdzenie, czy model należy do grupy 5–9
+    model_index = int(model_id.split(" ")[-1])
+    if 5 <= model_index <= 9:
+        # Konwersja do YCrCb (OpenCV używa YCrCb, różni się kolejnością od YCbCr)
+        ycrcb = cv2.cvtColor(img_float, cv2.COLOR_BGR2YCrCb)
+        y, cr, cb = cv2.split(ycrcb)
+
+        # Normalizacja Y (opcjonalnie, jeśli model tego wymaga)
+        y_input = np.expand_dims(y, axis=(0, -1))  # Shape: (1, H, W, 1)
+
+        # Przetwarzanie kanału Y
+        app.logger.info(f"Model {model_id}: przetwarzanie tylko kanału Y (shape: {y_input.shape})")
+        y_output = selected_model.predict(y_input)[0, :, :, 0]
+
+        # Clipping + konwersja do uint8
+        y_output = np.clip(y_output, 0, 255).astype('uint8')
+
+        # Scal kanały Y + oryginalne Cr/Cb
+        merged = cv2.merge((y_output, cb.astype('uint8'), cr.astype('uint8')))
+        img_bgr = cv2.cvtColor(merged, cv2.COLOR_YCrCb2BGR)
+        output = np.clip(img_bgr, 0, 255).astype('uint8')
+    else:
+        # Standardowe przetwarzanie RGB
+        input_tensor = np.expand_dims(img_float, axis=0)
+        app.logger.info(f"Model {model_id}: przetwarzanie RGB (shape: {input_tensor.shape})")
+        output = selected_model.predict(input_tensor)[0]
+        output = np.clip(output, 0, 255).astype('uint8')
+
+    # Kodowanie przetworzonego obrazu do formatu JPG
+    is_success, buffer = cv2.imencode(".jpg", output)
+    if not is_success:
+        raise ValueError("Nie udało się zakodować przetworzonego obrazu do formatu JPG.")
+
+    return buffer.tobytes()
+
     selected_model = MODELS.get(model_id)
 
     if selected_model is None:
